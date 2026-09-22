@@ -1,23 +1,23 @@
 # pulse-platform
 
-A small Python service, run like a real production system: deployed, monitored, load-tested, broken on purpose, and documented.
-
-The application itself stays simple on purpose. The point of this repo is everything around it: containers, Kubernetes, CI/CD, observability with SLOs, load and chaos testing, infrastructure as code, and the operational docs (runbooks, postmortems) that go with running a service for real.
+A small Python service run like a real production system: deployed, monitored, load-tested, broken on purpose, and documented. The app stays simple; the infrastructure and operations around it are the point.
 
 ## Status
 
-Step 1 in progress: FastAPI service skeleton with health/readiness endpoints, structured JSON logging, and Prometheus metrics. No database or background worker yet.
+FastAPI service with health/readiness checks against real Postgres/Redis, structured JSON logging, Prometheus metrics, and a Jobs API (`POST /jobs`, `GET /jobs/{id}`) backed by an Alembic-migrated Postgres schema. Jobs enqueue onto Redis via arq; no worker consumes them yet, so a created job stays `queued`.
 
 ## Repo layout
 
 ```
-app/            FastAPI service (this is the only thing that exists so far)
-tests/          Unit tests
-k8s/            Kubernetes manifests / Helm chart (kind or k3d locally)      [planned]
-terraform/      AWS infrastructure as code (VPC, EKS/ECS, RDS)              [planned]
-loadtest/       Locust load tests and chaos experiments                     [planned]
-docs/           Architecture diagram, runbooks, postmortems                 [planned]
+app/          FastAPI service
+tests/        Unit tests
+k8s/          Kubernetes manifests / Helm chart
+terraform/    AWS infrastructure as code (VPC, EKS/ECS, RDS)
+loadtest/     Locust load tests and chaos experiments
+docs/         Architecture diagram, runbooks, postmortems
 ```
+
+Only `app/` and `tests/` exist right now; the rest come as the roadmap progresses.
 
 ## Running locally
 
@@ -29,30 +29,54 @@ pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
 
-Then:
-
 ```bash
-curl localhost:8000/health    # liveness
-curl localhost:8000/ready     # readiness
-curl localhost:8000/metrics   # Prometheus exposition format
+curl localhost:8000/health
+curl localhost:8000/ready
+curl localhost:8000/metrics
 ```
-
-Run the tests:
 
 ```bash
 pytest
 ```
-
-Build and run the container:
 
 ```bash
 docker build -t pulse-platform .
 docker run -p 8000:8000 pulse-platform
 ```
 
-## Design decisions
+## Running with Docker Compose
 
-- **`/health` vs `/ready`** — separate liveness and readiness probes, matching Kubernetes conventions. `/health` says the process is alive; `/ready` says it can serve traffic. They're identical today since there are no external dependencies yet, but `/ready` is where DB/Redis connectivity checks will go so Kubernetes can pull a pod out of rotation without restarting it.
-- **JSON logs to stdout** — no log files, no log shipping agent baked into the app. In production, something at the platform layer (Fluent Bit, Vector, CloudWatch agent) is responsible for collecting stdout, not the app itself. Uvicorn's own loggers are rerouted through the same JSON formatter so access logs and app logs share one shape.
-- **Prometheus metrics keyed by route template, not raw path** — `/items/{id}` rather than `/items/42`. Keying by the concrete path would let path parameters blow up label cardinality, which is a common way to accidentally overload Prometheus.
-- **Settings via `pydantic-settings`, `PULSE_`-prefixed env vars** — one typed source of truth for config, validated at startup instead of failing on first use.
+```bash
+docker compose up --build
+```
+
+To run the app on the host against the containers' Postgres/Redis:
+
+```bash
+docker compose up -d postgres redis
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+## Database migrations
+
+Schema changes go through Alembic, not `create_all()`. With Postgres up:
+
+```bash
+alembic upgrade head
+```
+
+New migration after changing a model:
+
+```bash
+alembic revision --autogenerate -m "describe the change"
+```
+
+## Design notes
+
+- `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
+- JSON logs to stdout only; log collection is the platform's job, not the app's.
+- Prometheus metrics are keyed by route template, not raw path, to bound label cardinality.
+- Config is typed via `pydantic-settings`, `PULSE_`-prefixed env vars.
+- Schema changes are Alembic migrations, not `create_all()`.
+- `POST /jobs` enqueues to Redis before any worker exists. API and worker share only a queue contract, not code.

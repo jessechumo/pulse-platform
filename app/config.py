@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     environment: str = "development"
     log_level: str = "INFO"
     version: str = "0.1.0"
+    database_url: str = "postgresql+asyncpg://pulse:pulse@localhost:5432/pulse"
+    redis_url: str = "redis://localhost:6379/0"
 
 
 @lru_cache
