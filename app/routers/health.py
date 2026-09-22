@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, Response
 
+from app.cache import check_redis
 from app.db import check_database
 
 router = APIRouter(tags=["health"])
@@ -13,7 +14,9 @@ def health() -> dict[str, str]:
 
 @router.get("/ready")
 async def ready(
-    response: Response, database_ok: bool = Depends(check_database)
+    response: Response,
+    database_ok: bool = Depends(check_database),
+    redis_ok: bool = Depends(check_redis),
 ) -> dict[str, object]:
     """Readiness probe: process can serve traffic right now.
 
@@ -22,7 +25,10 @@ async def ready(
     to a pod, so a dependency outage should pull the pod out of rotation
     without killing and restarting it.
     """
-    checks = {"database": "ok" if database_ok else "unreachable"}
+    checks = {
+        "database": "ok" if database_ok else "unreachable",
+        "redis": "ok" if redis_ok else "unreachable",
+    }
     all_ok = all(value == "ok" for value in checks.values())
 
     if not all_ok:
