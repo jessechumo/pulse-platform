@@ -6,7 +6,7 @@ The application itself stays simple on purpose. The point of this repo is everyt
 
 ## Status
 
-Step 1 in progress: FastAPI service skeleton with health/readiness endpoints, structured JSON logging, and Prometheus metrics. No database or background worker yet.
+FastAPI service skeleton with health/readiness endpoints, structured JSON logging, and Prometheus metrics. Docker Compose brings up Postgres and Redis alongside the app for local dev; the app doesn't talk to them yet -- that's next.
 
 ## Repo layout
 
@@ -48,6 +48,22 @@ Build and run the container:
 ```bash
 docker build -t pulse-platform .
 docker run -p 8000:8000 pulse-platform
+```
+
+## Running with Docker Compose
+
+Brings up the app alongside Postgres and Redis, networked together:
+
+```bash
+docker compose up --build
+```
+
+To run the app directly on the host (e.g. `uvicorn --reload` for fast iteration) while still using the Postgres/Redis containers, start just the dependencies and point the app at their published ports:
+
+```bash
+docker compose up -d postgres redis
+cp .env.example .env
+uvicorn app.main:app --reload
 ```
 
 ## Design decisions
