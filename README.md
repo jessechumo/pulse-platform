@@ -17,7 +17,7 @@ loadtest/     Locust load tests and chaos experiments
 docs/         Architecture diagram, runbooks, postmortems
 ```
 
-Only `app/` and `tests/` exist right now; the rest come as the roadmap progresses.
+`terraform/`, `loadtest/`, and `docs/` come as the roadmap progresses.
 
 ## Running locally
 
@@ -72,6 +72,15 @@ New migration after changing a model:
 ```bash
 alembic revision --autogenerate -m "describe the change"
 ```
+
+## Running on Kubernetes (kind)
+
+```bash
+kind create cluster --config k8s/kind-config.yaml
+kubectl apply -f k8s/namespace.yaml
+```
+
+More manifests (deployment, service, ingress) follow.
 
 ## Design notes
 
