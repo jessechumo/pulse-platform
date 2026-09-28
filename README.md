@@ -4,7 +4,7 @@ A small Python service run like a real production system: deployed, monitored, l
 
 ## Status
 
-FastAPI service with health/readiness checks against real Postgres/Redis, structured JSON logging, Prometheus metrics, and a Jobs API (`POST /jobs`, `GET /jobs/{id}`) backed by an Alembic-migrated Postgres schema. Jobs enqueue onto Redis via arq; no worker consumes them yet, so a created job stays `queued`.
+FastAPI service with health/readiness checks against real Postgres/Redis, structured JSON logging, Prometheus metrics, and a Jobs API (`POST /jobs`, `GET /jobs/{id}`) backed by an Alembic-migrated Postgres schema. An arq worker processes queued jobs against Redis.
 
 ## Repo layout
 
@@ -36,7 +36,8 @@ curl localhost:8000/metrics
 ```
 
 ```bash
-pytest
+pytest -m "not integration"   # fast, no external services
+pytest                         # full suite, needs postgres/redis up
 ```
 
 ```bash
@@ -79,4 +80,4 @@ alembic revision --autogenerate -m "describe the change"
 - Prometheus metrics are keyed by route template, not raw path, to bound label cardinality.
 - Config is typed via `pydantic-settings`, `PULSE_`-prefixed env vars.
 - Schema changes are Alembic migrations, not `create_all()`.
-- `POST /jobs` enqueues to Redis before any worker exists. API and worker share only a queue contract, not code.
+- API and worker share only a queue contract (a job id, a function name), not code -- they're separate processes, deployed and scaled independently.
