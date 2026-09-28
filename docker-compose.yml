@@ -13,6 +13,19 @@ services:
       redis:
         condition: service_healthy
 
+  worker:
+    build: .
+    command: arq app.worker.WorkerSettings
+    environment:
+      PULSE_ENVIRONMENT: development
+      PULSE_DATABASE_URL: postgresql+asyncpg://pulse:pulse@postgres:5432/pulse
+      PULSE_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     environment:
