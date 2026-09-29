@@ -76,11 +76,13 @@ alembic revision --autogenerate -m "describe the change"
 ## Running on Kubernetes (kind)
 
 ```bash
-kind create cluster --config k8s/kind-config.yaml
-kubectl apply -f k8s/namespace.yaml
+kind create cluster --config k8s/kind/kind-config.yaml
+docker build -t pulse-platform:dev .
+kind load docker-image pulse-platform:dev --name pulse-platform
+kubectl apply -f k8s/
 ```
 
-More manifests (deployment, service, ingress) follow.
+Ingress and HPA follow.
 
 ## Design notes
 
