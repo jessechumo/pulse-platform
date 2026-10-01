@@ -92,3 +92,5 @@ Ingress and HPA follow.
 - Config is typed via `pydantic-settings`, `PULSE_`-prefixed env vars.
 - Schema changes are Alembic migrations, not `create_all()`.
 - API and worker share only a queue contract (a job id, a function name), not code -- they're separate processes, deployed and scaled independently.
+- `k8s/app-secret.yaml` is plaintext dev credentials checked into git, fine for a local kind cluster. Production would pull from a secret store (Sealed Secrets, External Secrets Operator, cloud KMS), not a committed Secret manifest.
+- Postgres and Redis run as raw StatefulSets, not a Helm chart -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.

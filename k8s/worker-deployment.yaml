@@ -21,10 +21,8 @@ spec:
           image: pulse-platform:dev
           imagePullPolicy: IfNotPresent
           command: ["arq", "app.worker.WorkerSettings"]
-          env:
-            - name: PULSE_ENVIRONMENT
-              value: "development"
-            - name: PULSE_DATABASE_URL
-              value: "postgresql+asyncpg://pulse:pulse@postgres:5432/pulse"
-            - name: PULSE_REDIS_URL
-              value: "redis://redis:6379/0"
+          envFrom:
+            - configMapRef:
+                name: pulse-app-config
+            - secretRef:
+                name: pulse-app-secrets
