@@ -7,7 +7,8 @@ metadata:
     app.kubernetes.io/name: pulse-app
     app.kubernetes.io/part-of: pulse-platform
 spec:
-  replicas: 2
+  # No replicas field: the HorizontalPodAutoscaler owns this field once it
+  # exists, and a hardcoded value here would just fight it on every apply.
   selector:
     matchLabels:
       app.kubernetes.io/name: pulse-app
@@ -27,6 +28,13 @@ spec:
                 name: pulse-app-config
             - secretRef:
                 name: pulse-app-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           livenessProbe:
             httpGet:
               path: /health

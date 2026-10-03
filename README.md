@@ -77,12 +77,27 @@ alembic revision --autogenerate -m "describe the change"
 
 ```bash
 kind create cluster --config k8s/kind/kind-config.yaml
+
+# ingress-nginx, kind's own install variant -- check for a newer release tag
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.3/deploy/static/provider/kind/deploy.yaml
+kubectl wait --namespace ingress-nginx --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller --timeout=120s
+
 docker build -t pulse-platform:dev .
 kind load docker-image pulse-platform:dev --name pulse-platform
 kubectl apply -f k8s/
+
+curl localhost/health
 ```
 
-Ingress and HPA follow.
+The HPAs need `metrics-server`, which kind doesn't ship by default. Its kubelet certs also aren't signed in a way metrics-server trusts out of the box, so it needs `--kubelet-insecure-tls` -- fine on a local kind cluster, not something to carry into a real one:
+
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl patch deployment metrics-server -n kube-system --type='json' \
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+kubectl get hpa -n pulse
+```
 
 ## Design notes
 
@@ -94,3 +109,5 @@ Ingress and HPA follow.
 - API and worker share only a queue contract (a job id, a function name), not code -- they're separate processes, deployed and scaled independently.
 - `k8s/app-secret.yaml` is plaintext dev credentials checked into git, fine for a local kind cluster. Production would pull from a secret store (Sealed Secrets, External Secrets Operator, cloud KMS), not a committed Secret manifest.
 - Postgres and Redis run as raw StatefulSets, not a Helm chart -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.
+- The ingress-nginx install is pinned to a release tag, not `main` -- a third-party manifest that can change underneath you shouldn't be applied from a moving branch.
+- `pulse-app` and `pulse-worker` have no `replicas` field -- once an HPA targets a Deployment, a hardcoded replica count in the Deployment just fights it on every apply.
