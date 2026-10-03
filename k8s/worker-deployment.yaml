@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/name: pulse-worker
     app.kubernetes.io/part-of: pulse-platform
 spec:
-  replicas: 2
+  # No replicas field: owned by the HorizontalPodAutoscaler, same as pulse-app.
   selector:
     matchLabels:
       app.kubernetes.io/name: pulse-worker
@@ -26,3 +26,10 @@ spec:
                 name: pulse-app-config
             - secretRef:
                 name: pulse-app-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
