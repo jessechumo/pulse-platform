@@ -1,0 +1,41 @@
+# Requires the PrometheusRule CRD from kube-prometheus-stack -- apply this
+# after installing it, same as app-servicemonitor.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pulse-app-slo
+  namespace: pulse
+  labels:
+    app.kubernetes.io/name: pulse-app
+spec:
+  groups:
+    - name: pulse-app.slo
+      rules:
+        # SLO: 99.5% availability. Fires when the 5xx ratio exceeds the
+        # 0.5% error budget for 5m straight. On no traffic, rate()/rate()
+        # is 0/0 -> NaN, which Prometheus just excludes from the result --
+        # no special-casing needed to avoid a false alert while idle.
+        - alert: PulseAppHighErrorRate
+          expr: |
+            (
+              sum(rate(pulse_http_requests_total{status=~"5.."}[5m]))
+              /
+              sum(rate(pulse_http_requests_total[5m]))
+            ) > 0.005
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: pulse-app error rate above SLO
+            description: 5xx ratio has been above 0.5% for 5m, burning the 99.5% availability SLO.
+
+        # SLO: p95 latency under 300ms.
+        - alert: PulseAppHighLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(pulse_http_request_duration_seconds_bucket[5m])) by (le)) > 0.3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: pulse-app p95 latency above SLO
+            description: p95 request latency has been above 300ms for 5m.

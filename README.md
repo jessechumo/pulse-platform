@@ -126,13 +126,20 @@ helm install observability prometheus-community/kube-prometheus-stack \
   -f k8s/observability/kube-prometheus-stack-values.yaml
 ```
 
-Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor needs its CRD from kube-prometheus-stack, so it has to come after, not in the same sweep:
+Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor and PrometheusRule need their CRDs from kube-prometheus-stack, so they have to come after, not in the same sweep:
 
 ```bash
 kubectl apply -f k8s/observability/
 ```
 
-If you're using the Helm chart instead, its own ServiceMonitor template only renders when the cluster actually has the CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick it up.
+If you're using the Helm chart instead, its ServiceMonitor and PrometheusRule templates only render when the cluster actually has the matching CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick them up.
+
+### SLOs
+
+- **Availability**: 99.5% of requests succeed (non-5xx), measured as a rolling 5m error ratio.
+- **Latency**: p95 request duration under 300ms, measured as a rolling 5m histogram quantile.
+
+Both are enforced as Prometheus alerts (`k8s/observability/app-prometheusrule.yaml`): `PulseAppHighErrorRate` and `PulseAppHighLatency`, each firing after 5 minutes sustained over threshold.
 
 ## Design notes
 
@@ -152,4 +159,5 @@ If you're using the Helm chart instead, its own ServiceMonitor template only ren
 - Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
 - `serviceMonitorSelectorNilUsesHelmValues: false` (and the PodMonitor/Rule equivalents) is load-bearing: without it, Prometheus only scrapes ServiceMonitors created by its own Helm release, and the app's own ServiceMonitor would silently never get scraped.
 - The Grafana dashboard JSON is loaded into the Helm chart via `.Files.Get`, not inlined into the template -- the dashboard's own legend formatting uses `{{ }}`, which would otherwise be parsed as Helm templating instead of passed through as text.
-- The chart's ServiceMonitor template is guarded by `.Capabilities.APIVersions.Has` -- it only renders if the ServiceMonitor CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
+- The chart's ServiceMonitor and PrometheusRule templates are both guarded by `.Capabilities.APIVersions.Has` -- they only render if their CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
+- The error-rate alert divides rate() by rate() with no traffic guard. On zero requests that's 0/0 -> NaN, which Prometheus drops from the result set rather than evaluating `NaN > 0.005` as true -- an idle service doesn't trip the alert, no special-casing needed.
