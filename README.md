@@ -198,6 +198,11 @@ terraform init
 terraform plan
 ```
 
+## Runbooks
+
+- [`docs/runbooks/on-call.md`](docs/runbooks/on-call.md) -- what to check when an alert fires, `/ready` starts failing, or a deploy needs rolling back.
+- [`docs/runbooks/terraform-apply-destroy.md`](docs/runbooks/terraform-apply-destroy.md) -- applying and tearing down the AWS infrastructure.
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
