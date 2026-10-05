@@ -113,6 +113,10 @@ Override anything in `values.yaml` with `--set` or `-f`, e.g. a different image 
 helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.2.3
 ```
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff check` in its own job, and the full `pytest` suite (including the integration tests, against real Postgres/Redis service containers) in another.
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
@@ -126,3 +130,4 @@ helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.
 - The ingress-nginx install is pinned to a release tag, not `main` -- a third-party manifest that can change underneath you shouldn't be applied from a moving branch.
 - `pulse-app` and `pulse-worker` have no `replicas` field -- once an HPA targets a Deployment, a hardcoded replica count in the Deployment just fights it on every apply.
 - The Helm chart doesn't manage the Namespace -- it's created separately with `--create-namespace`, so deleting the release can't take the namespace (and anything else in it) down with it.
+- CI runs lint and test as separate jobs -- a lint failure doesn't wait on Postgres/Redis service containers to spin up, and they fail independently in the GitHub UI instead of as one undifferentiated red X.
