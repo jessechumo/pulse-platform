@@ -1,0 +1,16 @@
+# Picked up by the Grafana sidecar (sidecar.dashboards in the
+# kube-prometheus-stack values) via the grafana_dashboard label.
+# .Files.Get loads the JSON as raw text, not re-templated -- the dashboard
+# itself uses double-curly-brace syntax for Grafana's own legend
+# formatting, which would otherwise collide with Helm's own templating
+# if this were inlined directly instead.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pulse-grafana-dashboard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  pulse-platform.json: |
+{{ .Files.Get "dashboards/pulse-platform.json" | indent 4 }}

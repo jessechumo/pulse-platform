@@ -1,0 +1,20 @@
+# Requires the ServiceMonitor CRD from kube-prometheus-stack -- apply this
+# after installing it, not as part of `kubectl apply -f k8s/`.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pulse-app
+  namespace: pulse
+  labels:
+    app.kubernetes.io/name: pulse-app
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pulse-app
+  namespaceSelector:
+    matchNames:
+      - pulse
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

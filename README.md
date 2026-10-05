@@ -126,6 +126,14 @@ helm install observability prometheus-community/kube-prometheus-stack \
   -f k8s/observability/kube-prometheus-stack-values.yaml
 ```
 
+Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor needs its CRD from kube-prometheus-stack, so it has to come after, not in the same sweep:
+
+```bash
+kubectl apply -f k8s/observability/
+```
+
+If you're using the Helm chart instead, its own ServiceMonitor template only renders when the cluster actually has the CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick it up.
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
@@ -143,3 +151,5 @@ helm install observability prometheus-community/kube-prometheus-stack \
 - `trivy-action` is pinned by commit SHA, not a version tag -- it's third-party, and a tag can be moved to point at different code later. First-party actions (`actions/checkout`, `actions/setup-python`) stay tag-pinned; that distinction is deliberate, not an oversight.
 - Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
 - `serviceMonitorSelectorNilUsesHelmValues: false` (and the PodMonitor/Rule equivalents) is load-bearing: without it, Prometheus only scrapes ServiceMonitors created by its own Helm release, and the app's own ServiceMonitor would silently never get scraped.
+- The Grafana dashboard JSON is loaded into the Helm chart via `.Files.Get`, not inlined into the template -- the dashboard's own legend formatting uses `{{ }}`, which would otherwise be parsed as Helm templating instead of passed through as text.
+- The chart's ServiceMonitor template is guarded by `.Capabilities.APIVersions.Has` -- it only renders if the ServiceMonitor CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
