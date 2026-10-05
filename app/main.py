@@ -23,7 +23,8 @@ async def lifespan(app: FastAPI):
     )
     app.state.arq_pool = await create_arq_pool()
     yield
-    await app.state.arq_pool.close()
+    if app.state.arq_pool is not None:
+        await app.state.arq_pool.close()
     logger.info("service stopping")
 
 

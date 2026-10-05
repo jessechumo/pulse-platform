@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.models.job import Job
-from app.queue import get_arq_pool
+from app.queue import require_arq_pool
 from app.schemas.job import JobCreate, JobRead
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -17,7 +17,7 @@ async def create_job(
     body: JobCreate,
     response: Response,
     session: AsyncSession = Depends(get_session),
-    arq_pool: ArqRedis = Depends(get_arq_pool),
+    arq_pool: ArqRedis = Depends(require_arq_pool),
 ) -> Job:
     job = Job(payload={"duration_seconds": body.duration_seconds})
     session.add(job)
