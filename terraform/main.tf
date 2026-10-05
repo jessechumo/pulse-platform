@@ -24,3 +24,15 @@ module "eks" {
   subnet_ids         = module.vpc.private_subnet_ids
   tags               = local.tags
 }
+
+module "rds" {
+  source = "./modules/rds"
+
+  name                       = local.name
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_subnet_ids
+  allowed_security_group_ids = [module.eks.node_security_group_id]
+  password                   = var.db_password
+
+  tags = local.tags
+}

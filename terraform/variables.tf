@@ -27,3 +27,9 @@ variable "kubernetes_version" {
   type        = string
   default     = "1.31"
 }
+
+variable "db_password" {
+  description = "RDS master password. No default on purpose -- pass via TF_VAR_db_password or a gitignored *.tfvars file, never commit a real one."
+  type        = string
+  sensitive   = true
+}

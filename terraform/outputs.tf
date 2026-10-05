@@ -22,3 +22,8 @@ output "cluster_endpoint" {
   description = "EKS control plane endpoint"
   value       = module.eks.cluster_endpoint
 }
+
+output "rds_endpoint" {
+  description = "RDS connection endpoint (host:port)"
+  value       = module.rds.endpoint
+}
