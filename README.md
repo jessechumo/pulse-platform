@@ -2,6 +2,37 @@
 
 A small Python service run like a real production system: deployed, monitored, load-tested, broken on purpose, and documented. The app stays simple; the infrastructure and operations around it are the point.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    client[Client]
+
+    subgraph cluster["Kubernetes (pulse namespace)"]
+        ingress[Ingress - nginx]
+        app[pulse-app Deployment]
+        worker[pulse-worker Deployment]
+        pg[(Postgres StatefulSet)]
+        redis[(Redis StatefulSet)]
+
+        subgraph obs[Observability]
+            prom[Prometheus]
+            grafana[Grafana]
+            alertmgr[Alertmanager]
+        end
+    end
+
+    client --> ingress --> app
+    app --> pg
+    app -- enqueue job --> redis
+    redis -- consume job --> worker
+    worker --> pg
+
+    prom -- scrape /metrics --> app
+    grafana --> prom
+    prom -- fire alert --> alertmgr
+```
+
 ## Status
 
 FastAPI service with health/readiness checks against real Postgres/Redis, structured JSON logging, Prometheus metrics, and a Jobs API (`POST /jobs`, `GET /jobs/{id}`) backed by an Alembic-migrated Postgres schema. An arq worker processes queued jobs against Redis.
@@ -12,12 +43,10 @@ FastAPI service with health/readiness checks against real Postgres/Redis, struct
 app/          FastAPI service
 tests/        Unit tests
 k8s/          Kubernetes manifests / Helm chart
-terraform/    AWS infrastructure as code (VPC, EKS/ECS, RDS)
+terraform/    AWS infrastructure as code (VPC, EKS, RDS)
 loadtest/     Locust load tests and chaos experiments
 docs/         Architecture diagram, runbooks, postmortems
 ```
-
-`terraform/`, `loadtest/`, and `docs/` come as the roadmap progresses.
 
 ## Running locally
 
@@ -87,6 +116,12 @@ docker build -t pulse-platform:dev .
 kind load docker-image pulse-platform:dev --name pulse-platform
 kubectl apply -f k8s/
 
+# Schema has to exist before /jobs will work -- nothing above runs
+# migrations automatically. Re-run after any later schema change too:
+# kubectl delete job pulse-migrate -n pulse --ignore-not-found first.
+kubectl apply -f k8s/jobs/migrate-job.yaml
+kubectl wait --for=condition=complete job/pulse-migrate -n pulse --timeout=60s
+
 curl localhost/health
 ```
 
@@ -101,7 +136,7 @@ kubectl get hpa -n pulse
 
 ## Running with Helm
 
-Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server):
+Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server). Migrations run automatically here -- the chart includes a `pre-install,pre-upgrade` hook Job that runs `alembic upgrade head` before the app rolls out, unlike the raw-manifest path above where it's a manual step:
 
 ```bash
 helm install pulse k8s/helm/pulse-platform --namespace pulse --create-namespace
@@ -126,13 +161,53 @@ helm install observability prometheus-community/kube-prometheus-stack \
   -f k8s/observability/kube-prometheus-stack-values.yaml
 ```
 
-Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor needs its CRD from kube-prometheus-stack, so it has to come after, not in the same sweep:
+Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor and PrometheusRule need their CRDs from kube-prometheus-stack, so they have to come after, not in the same sweep:
 
 ```bash
 kubectl apply -f k8s/observability/
 ```
 
-If you're using the Helm chart instead, its own ServiceMonitor template only renders when the cluster actually has the CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick it up.
+If you're using the Helm chart instead, its ServiceMonitor and PrometheusRule templates only render when the cluster actually has the matching CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick them up.
+
+### SLOs
+
+- **Availability**: 99.5% of requests succeed (non-5xx), measured as a rolling 5m error ratio.
+- **Latency**: p95 request duration under 300ms, measured as a rolling 5m histogram quantile.
+
+Both are enforced as Prometheus alerts (`k8s/observability/app-prometheusrule.yaml`): `PulseAppHighErrorRate` and `PulseAppHighLatency`, each firing after 5 minutes sustained over threshold.
+
+## Load testing
+
+```bash
+pip install locust
+locust -f loadtest/locustfile.py --host http://localhost:8000
+```
+
+Open `http://localhost:8089` to drive load and watch the Grafana dashboard / HPA respond. Against the Helm-deployed app through Ingress, use `--host http://localhost` instead.
+
+## Chaos experiments
+
+```bash
+loadtest/chaos/kill-app-pod.sh      # kill a random pulse-app pod
+loadtest/chaos/kill-postgres.sh     # kill the postgres pod
+```
+
+Each script states its hypothesis and what to watch in a comment at the top. Run them while `loadtest/locustfile.py` is generating traffic to see the effect on real requests, not just on an idle cluster.
+
+## Terraform (AWS)
+
+Provisions an equivalent of the kind setup on real AWS: VPC, EKS, RDS. Meant to be applied once for evidence it works, then destroyed -- see [`docs/runbooks/terraform-apply-destroy.md`](docs/runbooks/terraform-apply-destroy.md) for the full walkthrough, cost ballpark, and what to verify before tearing it down.
+
+```bash
+cd terraform
+terraform init
+terraform plan
+```
+
+## Runbooks
+
+- [`docs/runbooks/on-call.md`](docs/runbooks/on-call.md) -- what to check when an alert fires, `/ready` starts failing, or a deploy needs rolling back.
+- [`docs/runbooks/terraform-apply-destroy.md`](docs/runbooks/terraform-apply-destroy.md) -- applying and tearing down the AWS infrastructure.
 
 ## Design notes
 
@@ -152,4 +227,9 @@ If you're using the Helm chart instead, its own ServiceMonitor template only ren
 - Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
 - `serviceMonitorSelectorNilUsesHelmValues: false` (and the PodMonitor/Rule equivalents) is load-bearing: without it, Prometheus only scrapes ServiceMonitors created by its own Helm release, and the app's own ServiceMonitor would silently never get scraped.
 - The Grafana dashboard JSON is loaded into the Helm chart via `.Files.Get`, not inlined into the template -- the dashboard's own legend formatting uses `{{ }}`, which would otherwise be parsed as Helm templating instead of passed through as text.
-- The chart's ServiceMonitor template is guarded by `.Capabilities.APIVersions.Has` -- it only renders if the ServiceMonitor CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
+- The chart's ServiceMonitor and PrometheusRule templates are both guarded by `.Capabilities.APIVersions.Has` -- they only render if their CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
+- The error-rate alert divides rate() by rate() with no traffic guard. On zero requests that's 0/0 -> NaN, which Prometheus drops from the result set rather than evaluating `NaN > 0.005` as true -- an idle service doesn't trip the alert, no special-casing needed.
+- Redis being unreachable at startup doesn't crash the app -- `/jobs` degrades to a clean 503 and `/health`/`/ready` keep responding. The app previously crash-looped on this (the arq pool's connection check at startup propagated and killed the whole process), which defeated the entire point of having a readiness probe.
+- `jobs.payload`/`jobs.result` are `jsonb`, not `json` -- Postgres's plain `json` type has no equality operator, so you can't even query for a row by its exact JSON content. Added as migration `0002` rather than editing `0001` in place, since a migration that may already be applied elsewhere should never be rewritten.
+- The Docker image includes `alembic.ini` and `alembic/` -- without them, nothing built from this image can run migrations, which matters once a migration runs as a Kubernetes Job using this same image instead of a developer's host Python.
+- Neither `kubectl apply -f k8s/` nor the raw manifests run migrations automatically -- `k8s/jobs/migrate-job.yaml` is a deliberate separate step (a completed Job's spec is immutable, so it can't just live in the main sweep without breaking on the second apply). The Helm chart automates this instead via a `pre-install,pre-upgrade` hook Job with a delete policy that clears the previous run first.

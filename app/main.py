@@ -3,7 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.cache import redis_client
 from app.config import get_settings
+from app.db import engine
 from app.logging import configure_logging
 from app.metrics import MetricsMiddleware, metrics_response
 from app.queue import create_arq_pool
@@ -23,7 +25,10 @@ async def lifespan(app: FastAPI):
     )
     app.state.arq_pool = await create_arq_pool()
     yield
-    await app.state.arq_pool.close()
+    if app.state.arq_pool is not None:
+        await app.state.arq_pool.close()
+    await engine.dispose()
+    await redis_client.aclose()
     logger.info("service stopping")
 
 

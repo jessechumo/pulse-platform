@@ -1,0 +1,36 @@
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: pulse-app-slo
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: pulse-app
+spec:
+  groups:
+    - name: pulse-app.slo
+      rules:
+        - alert: PulseAppHighErrorRate
+          expr: |
+            (
+              sum(rate(pulse_http_requests_total{status=~"5.."}[5m]))
+              /
+              sum(rate(pulse_http_requests_total[5m]))
+            ) > 0.005
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: pulse-app error rate above SLO
+            description: 5xx ratio has been above 0.5% for 5m, burning the 99.5% availability SLO.
+
+        - alert: PulseAppHighLatency
+          expr: |
+            histogram_quantile(0.95, sum(rate(pulse_http_request_duration_seconds_bucket[5m])) by (le)) > 0.3
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: pulse-app p95 latency above SLO
+            description: p95 request latency has been above 300ms for 5m.
+{{- end }}
