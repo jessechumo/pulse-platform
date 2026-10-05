@@ -150,6 +150,15 @@ locust -f loadtest/locustfile.py --host http://localhost:8000
 
 Open `http://localhost:8089` to drive load and watch the Grafana dashboard / HPA respond. Against the Helm-deployed app through Ingress, use `--host http://localhost` instead.
 
+## Chaos experiments
+
+```bash
+loadtest/chaos/kill-app-pod.sh      # kill a random pulse-app pod
+loadtest/chaos/kill-postgres.sh     # kill the postgres pod
+```
+
+Each script states its hypothesis and what to watch in a comment at the top. Run them while `loadtest/locustfile.py` is generating traffic to see the effect on real requests, not just on an idle cluster.
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
