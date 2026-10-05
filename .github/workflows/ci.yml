@@ -68,3 +68,23 @@ jobs:
 
       - name: Pytest
         run: pytest
+
+  build-and-scan:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t pulse-platform:${{ github.sha }} .
+
+      # Third-party action, pinned by commit SHA rather than a tag -- a tag
+      # can be moved to point at different code later, a SHA can't.
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: pulse-platform:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH

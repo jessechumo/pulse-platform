@@ -115,7 +115,7 @@ helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.
 
 ## CI
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff check` in its own job, and the full `pytest` suite (including the integration tests, against real Postgres/Redis service containers) in another.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff check` in its own job, the full `pytest` suite (including the integration tests, against real Postgres/Redis service containers) in another, then builds the Docker image and scans it with Trivy once both pass.
 
 ## Design notes
 
@@ -131,3 +131,5 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff che
 - `pulse-app` and `pulse-worker` have no `replicas` field -- once an HPA targets a Deployment, a hardcoded replica count in the Deployment just fights it on every apply.
 - The Helm chart doesn't manage the Namespace -- it's created separately with `--create-namespace`, so deleting the release can't take the namespace (and anything else in it) down with it.
 - CI runs lint and test as separate jobs -- a lint failure doesn't wait on Postgres/Redis service containers to spin up, and they fail independently in the GitHub UI instead of as one undifferentiated red X.
+- `trivy-action` is pinned by commit SHA, not a version tag -- it's third-party, and a tag can be moved to point at different code later. First-party actions (`actions/checkout`, `actions/setup-python`) stay tag-pinned; that distinction is deliberate, not an oversight.
+- Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
