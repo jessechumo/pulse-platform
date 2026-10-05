@@ -12,3 +12,13 @@ output "public_subnet_ids" {
   description = "IDs of the public subnets"
   value       = module.vpc.public_subnet_ids
 }
+
+output "cluster_name" {
+  description = "EKS cluster name -- pass to aws eks update-kubeconfig"
+  value       = module.eks.cluster_name
+}
+
+output "cluster_endpoint" {
+  description = "EKS control plane endpoint"
+  value       = module.eks.cluster_endpoint
+}
