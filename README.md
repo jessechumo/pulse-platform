@@ -99,6 +99,41 @@ kubectl patch deployment metrics-server -n kube-system --type='json' \
 kubectl get hpa -n pulse
 ```
 
+## Running with Helm
+
+Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server):
+
+```bash
+helm install pulse k8s/helm/pulse-platform --namespace pulse --create-namespace
+```
+
+Override anything in `values.yaml` with `--set` or `-f`, e.g. a different image tag:
+
+```bash
+helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.2.3
+```
+
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff check` in its own job, the full `pytest` suite (including the integration tests, against real Postgres/Redis service containers) in another, then builds the Docker image and scans it with Trivy once both pass.
+
+## Observability
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install observability prometheus-community/kube-prometheus-stack \
+  --namespace observability --create-namespace \
+  -f k8s/observability/kube-prometheus-stack-values.yaml
+```
+
+Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor needs its CRD from kube-prometheus-stack, so it has to come after, not in the same sweep:
+
+```bash
+kubectl apply -f k8s/observability/
+```
+
+If you're using the Helm chart instead, its own ServiceMonitor template only renders when the cluster actually has the CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick it up.
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
@@ -108,6 +143,13 @@ kubectl get hpa -n pulse
 - Schema changes are Alembic migrations, not `create_all()`.
 - API and worker share only a queue contract (a job id, a function name), not code -- they're separate processes, deployed and scaled independently.
 - `k8s/app-secret.yaml` is plaintext dev credentials checked into git, fine for a local kind cluster. Production would pull from a secret store (Sealed Secrets, External Secrets Operator, cloud KMS), not a committed Secret manifest.
-- Postgres and Redis run as raw StatefulSets, not a Helm chart -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.
+- Postgres and Redis run as raw StatefulSets -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.
 - The ingress-nginx install is pinned to a release tag, not `main` -- a third-party manifest that can change underneath you shouldn't be applied from a moving branch.
 - `pulse-app` and `pulse-worker` have no `replicas` field -- once an HPA targets a Deployment, a hardcoded replica count in the Deployment just fights it on every apply.
+- The Helm chart doesn't manage the Namespace -- it's created separately with `--create-namespace`, so deleting the release can't take the namespace (and anything else in it) down with it.
+- CI runs lint and test as separate jobs -- a lint failure doesn't wait on Postgres/Redis service containers to spin up, and they fail independently in the GitHub UI instead of as one undifferentiated red X.
+- `trivy-action` is pinned by commit SHA, not a version tag -- it's third-party, and a tag can be moved to point at different code later. First-party actions (`actions/checkout`, `actions/setup-python`) stay tag-pinned; that distinction is deliberate, not an oversight.
+- Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
+- `serviceMonitorSelectorNilUsesHelmValues: false` (and the PodMonitor/Rule equivalents) is load-bearing: without it, Prometheus only scrapes ServiceMonitors created by its own Helm release, and the app's own ServiceMonitor would silently never get scraped.
+- The Grafana dashboard JSON is loaded into the Helm chart via `.Files.Get`, not inlined into the template -- the dashboard's own legend formatting uses `{{ }}`, which would otherwise be parsed as Helm templating instead of passed through as text.
+- The chart's ServiceMonitor template is guarded by `.Capabilities.APIVersions.Has` -- it only renders if the ServiceMonitor CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.

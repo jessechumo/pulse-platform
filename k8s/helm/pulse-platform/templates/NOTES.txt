@@ -1,0 +1,12 @@
+pulse-platform installed into namespace {{ .Release.Namespace }}.
+
+If ingress-nginx is installed and the kind cluster maps ports 80/443 to the
+host (see k8s/kind/kind-config.yaml):
+
+  curl localhost/health
+  curl localhost/ready
+
+Otherwise, port-forward the Service directly:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/pulse-app 8000:80
+  curl localhost:8000/health

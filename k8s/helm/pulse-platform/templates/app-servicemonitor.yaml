@@ -1,0 +1,20 @@
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pulse-app
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: pulse-app
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pulse-app
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+{{- end }}

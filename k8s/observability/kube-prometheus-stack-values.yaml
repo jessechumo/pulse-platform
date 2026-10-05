@@ -1,0 +1,54 @@
+# Values for the prometheus-community/kube-prometheus-stack chart.
+#
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install observability prometheus-community/kube-prometheus-stack \
+#     --namespace observability --create-namespace \
+#     -f k8s/observability/kube-prometheus-stack-values.yaml
+
+prometheus:
+  prometheusSpec:
+    # By default Prometheus Operator only picks up ServiceMonitors/
+    # PodMonitors/PrometheusRules created by its own Helm release. Without
+    # these three, the app's ServiceMonitor and alert rules would just sit
+    # there, never scraped -- a very easy thing to miss.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    retention: 2d
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+grafana:
+  # Dev-only: same caveat as every other plaintext credential in this repo
+  # (see k8s/app-secret.yaml). Override via --set for anything but a local
+  # kind cluster.
+  adminPassword: "pulse-admin"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  sidecar:
+    dashboards:
+      enabled: true
+      # Picks up any ConfigMap labeled grafana_dashboard: "1" in any
+      # namespace, which is how k8s/observability/pulse-dashboard-configmap.yaml
+      # gets imported without touching the Grafana UI.
+      searchNamespace: ALL

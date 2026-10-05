@@ -1,0 +1,69 @@
+image:
+  repository: pulse-platform
+  tag: dev
+  pullPolicy: IfNotPresent
+
+app:
+  hpa:
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+worker:
+  hpa:
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+config:
+  environment: development
+  logLevel: INFO
+
+# Dev-only plaintext values, same caveat as the raw k8s/app-secret.yaml:
+# fine for a local kind cluster, override via --set or a separate values
+# file for anything else -- never commit real credentials here.
+secrets:
+  databaseUrl: "postgresql+asyncpg://pulse:pulse@postgres:5432/pulse"
+  redisUrl: "redis://redis:6379/0"
+
+postgres:
+  image: postgres:16-alpine
+  user: pulse
+  password: pulse
+  database: pulse
+  storage: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+redis:
+  image: redis:7-alpine
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+ingress:
+  className: nginx
+  host: "" # empty matches any host, same as the raw manifest
