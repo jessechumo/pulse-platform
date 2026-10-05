@@ -116,6 +116,12 @@ docker build -t pulse-platform:dev .
 kind load docker-image pulse-platform:dev --name pulse-platform
 kubectl apply -f k8s/
 
+# Schema has to exist before /jobs will work -- nothing above runs
+# migrations automatically. Re-run after any later schema change too:
+# kubectl delete job pulse-migrate -n pulse --ignore-not-found first.
+kubectl apply -f k8s/jobs/migrate-job.yaml
+kubectl wait --for=condition=complete job/pulse-migrate -n pulse --timeout=60s
+
 curl localhost/health
 ```
 
@@ -130,7 +136,7 @@ kubectl get hpa -n pulse
 
 ## Running with Helm
 
-Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server):
+Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server). Migrations run automatically here -- the chart includes a `pre-install,pre-upgrade` hook Job that runs `alembic upgrade head` before the app rolls out, unlike the raw-manifest path above where it's a manual step:
 
 ```bash
 helm install pulse k8s/helm/pulse-platform --namespace pulse --create-namespace
@@ -224,3 +230,6 @@ terraform plan
 - The chart's ServiceMonitor and PrometheusRule templates are both guarded by `.Capabilities.APIVersions.Has` -- they only render if their CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
 - The error-rate alert divides rate() by rate() with no traffic guard. On zero requests that's 0/0 -> NaN, which Prometheus drops from the result set rather than evaluating `NaN > 0.005` as true -- an idle service doesn't trip the alert, no special-casing needed.
 - Redis being unreachable at startup doesn't crash the app -- `/jobs` degrades to a clean 503 and `/health`/`/ready` keep responding. The app previously crash-looped on this (the arq pool's connection check at startup propagated and killed the whole process), which defeated the entire point of having a readiness probe.
+- `jobs.payload`/`jobs.result` are `jsonb`, not `json` -- Postgres's plain `json` type has no equality operator, so you can't even query for a row by its exact JSON content. Added as migration `0002` rather than editing `0001` in place, since a migration that may already be applied elsewhere should never be rewritten.
+- The Docker image includes `alembic.ini` and `alembic/` -- without them, nothing built from this image can run migrations, which matters once a migration runs as a Kubernetes Job using this same image instead of a developer's host Python.
+- Neither `kubectl apply -f k8s/` nor the raw manifests run migrations automatically -- `k8s/jobs/migrate-job.yaml` is a deliberate separate step (a completed Job's spec is immutable, so it can't just live in the main sweep without breaking on the second apply). The Helm chart automates this instead via a `pre-install,pre-upgrade` hook Job with a delete policy that clears the previous run first.

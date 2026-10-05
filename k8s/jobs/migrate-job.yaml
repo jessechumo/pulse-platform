@@ -1,0 +1,27 @@
+# Not part of `kubectl apply -f k8s/` -- a completed Job's spec is
+# immutable, so re-running that command after this Job has already
+# finished once would fail on it specifically. Delete and recreate instead:
+#
+#   kubectl delete job pulse-migrate -n pulse --ignore-not-found
+#   kubectl apply -f k8s/jobs/migrate-job.yaml
+#   kubectl wait --for=condition=complete job/pulse-migrate -n pulse --timeout=60s
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pulse-migrate
+  namespace: pulse
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: pulse-platform:dev
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: pulse-app-config
+            - secretRef:
+                name: pulse-app-secrets
