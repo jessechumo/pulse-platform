@@ -2,6 +2,37 @@
 
 A small Python service run like a real production system: deployed, monitored, load-tested, broken on purpose, and documented. The app stays simple; the infrastructure and operations around it are the point.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    client[Client]
+
+    subgraph cluster["Kubernetes (pulse namespace)"]
+        ingress[Ingress - nginx]
+        app[pulse-app Deployment]
+        worker[pulse-worker Deployment]
+        pg[(Postgres StatefulSet)]
+        redis[(Redis StatefulSet)]
+
+        subgraph obs[Observability]
+            prom[Prometheus]
+            grafana[Grafana]
+            alertmgr[Alertmanager]
+        end
+    end
+
+    client --> ingress --> app
+    app --> pg
+    app -- enqueue job --> redis
+    redis -- consume job --> worker
+    worker --> pg
+
+    prom -- scrape /metrics --> app
+    grafana --> prom
+    prom -- fire alert --> alertmgr
+```
+
 ## Status
 
 FastAPI service with health/readiness checks against real Postgres/Redis, structured JSON logging, Prometheus metrics, and a Jobs API (`POST /jobs`, `GET /jobs/{id}`) backed by an Alembic-migrated Postgres schema. An arq worker processes queued jobs against Redis.
