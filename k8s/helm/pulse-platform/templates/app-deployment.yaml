@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pulse-app
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: pulse-app
+    {{- include "pulse-platform.labels" . | nindent 4 }}
+spec:
+  # No replicas field: the HorizontalPodAutoscaler owns this field.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pulse-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pulse-app
+    spec:
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: pulse-app-config
+            - secretRef:
+                name: pulse-app-secrets
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10

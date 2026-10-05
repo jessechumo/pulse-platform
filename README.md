@@ -99,6 +99,20 @@ kubectl patch deployment metrics-server -n kube-system --type='json' \
 kubectl get hpa -n pulse
 ```
 
+## Running with Helm
+
+Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server):
+
+```bash
+helm install pulse k8s/helm/pulse-platform --namespace pulse --create-namespace
+```
+
+Override anything in `values.yaml` with `--set` or `-f`, e.g. a different image tag:
+
+```bash
+helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.2.3
+```
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
@@ -108,6 +122,7 @@ kubectl get hpa -n pulse
 - Schema changes are Alembic migrations, not `create_all()`.
 - API and worker share only a queue contract (a job id, a function name), not code -- they're separate processes, deployed and scaled independently.
 - `k8s/app-secret.yaml` is plaintext dev credentials checked into git, fine for a local kind cluster. Production would pull from a secret store (Sealed Secrets, External Secrets Operator, cloud KMS), not a committed Secret manifest.
-- Postgres and Redis run as raw StatefulSets, not a Helm chart -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.
+- Postgres and Redis run as raw StatefulSets -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.
 - The ingress-nginx install is pinned to a release tag, not `main` -- a third-party manifest that can change underneath you shouldn't be applied from a moving branch.
 - `pulse-app` and `pulse-worker` have no `replicas` field -- once an HPA targets a Deployment, a hardcoded replica count in the Deployment just fights it on every apply.
+- The Helm chart doesn't manage the Namespace -- it's created separately with `--create-namespace`, so deleting the release can't take the namespace (and anything else in it) down with it.

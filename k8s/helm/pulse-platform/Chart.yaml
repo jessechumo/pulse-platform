@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pulse-platform
+description: FastAPI service, worker, Postgres, and Redis for pulse-platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
