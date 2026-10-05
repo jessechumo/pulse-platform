@@ -12,12 +12,10 @@ FastAPI service with health/readiness checks against real Postgres/Redis, struct
 app/          FastAPI service
 tests/        Unit tests
 k8s/          Kubernetes manifests / Helm chart
-terraform/    AWS infrastructure as code (VPC, EKS/ECS, RDS)
+terraform/    AWS infrastructure as code (VPC, EKS, RDS)
 loadtest/     Locust load tests and chaos experiments
 docs/         Architecture diagram, runbooks, postmortems
 ```
-
-`terraform/`, `loadtest/`, and `docs/` come as the roadmap progresses.
 
 ## Running locally
 
@@ -158,6 +156,16 @@ loadtest/chaos/kill-postgres.sh     # kill the postgres pod
 ```
 
 Each script states its hypothesis and what to watch in a comment at the top. Run them while `loadtest/locustfile.py` is generating traffic to see the effect on real requests, not just on an idle cluster.
+
+## Terraform (AWS)
+
+Provisions an equivalent of the kind setup on real AWS: VPC, EKS, RDS. Meant to be applied once for evidence it works, then destroyed -- see [`docs/runbooks/terraform-apply-destroy.md`](docs/runbooks/terraform-apply-destroy.md) for the full walkthrough, cost ballpark, and what to verify before tearing it down.
+
+```bash
+cd terraform
+terraform init
+terraform plan
+```
 
 ## Design notes
 
