@@ -117,6 +117,15 @@ helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff check` in its own job, the full `pytest` suite (including the integration tests, against real Postgres/Redis service containers) in another, then builds the Docker image and scans it with Trivy once both pass.
 
+## Observability
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install observability prometheus-community/kube-prometheus-stack \
+  --namespace observability --create-namespace \
+  -f k8s/observability/kube-prometheus-stack-values.yaml
+```
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
@@ -133,3 +142,4 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff che
 - CI runs lint and test as separate jobs -- a lint failure doesn't wait on Postgres/Redis service containers to spin up, and they fail independently in the GitHub UI instead of as one undifferentiated red X.
 - `trivy-action` is pinned by commit SHA, not a version tag -- it's third-party, and a tag can be moved to point at different code later. First-party actions (`actions/checkout`, `actions/setup-python`) stay tag-pinned; that distinction is deliberate, not an oversight.
 - Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
+- `serviceMonitorSelectorNilUsesHelmValues: false` (and the PodMonitor/Rule equivalents) is load-bearing: without it, Prometheus only scrapes ServiceMonitors created by its own Helm release, and the app's own ServiceMonitor would silently never get scraped.
