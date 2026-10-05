@@ -141,6 +141,15 @@ If you're using the Helm chart instead, its ServiceMonitor and PrometheusRule te
 
 Both are enforced as Prometheus alerts (`k8s/observability/app-prometheusrule.yaml`): `PulseAppHighErrorRate` and `PulseAppHighLatency`, each firing after 5 minutes sustained over threshold.
 
+## Load testing
+
+```bash
+pip install locust
+locust -f loadtest/locustfile.py --host http://localhost:8000
+```
+
+Open `http://localhost:8089` to drive load and watch the Grafana dashboard / HPA respond. Against the Helm-deployed app through Ingress, use `--host http://localhost` instead.
+
 ## Design notes
 
 - `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
