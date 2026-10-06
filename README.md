@@ -1,202 +1,113 @@
 # pulse-platform
 
-A small Python service run like a real production system: deployed, monitored, load-tested, broken on purpose, and documented. The app stays simple; the infrastructure and operations around it are the point.
+pulse-platform is a small FastAPI service deployed and operated like a real production system. The app itself is intentionally simple. The point is everything around it: containers, Kubernetes, CI/CD, observability with SLOs, load and chaos testing, and infrastructure as code.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    client[Client]
+![Architecture diagram](docs/images/architecture.png)
 
-    subgraph cluster["Kubernetes (pulse namespace)"]
-        ingress[Ingress - nginx]
-        app[pulse-app Deployment]
-        worker[pulse-worker Deployment]
-        pg[(Postgres StatefulSet)]
-        redis[(Redis StatefulSet)]
+A client request passes through an Ingress to the FastAPI app, which reads and writes Postgres directly and enqueues background work on Redis. A separate worker consumes that queue and writes results back to Postgres. Prometheus scrapes the app's metrics, Grafana visualizes them, and Alertmanager fires when either SLO is breached.
 
-        subgraph obs[Observability]
-            prom[Prometheus]
-            grafana[Grafana]
-            alertmgr[Alertmanager]
-        end
-    end
+## Quick start
 
-    client --> ingress --> app
-    app --> pg
-    app -- enqueue job --> redis
-    redis -- consume job --> worker
-    worker --> pg
-
-    prom -- scrape /metrics --> app
-    grafana --> prom
-    prom -- fire alert --> alertmgr
-```
-
-## Status
-
-FastAPI service with health/readiness checks against real Postgres/Redis, structured JSON logging, Prometheus metrics, and a Jobs API (`POST /jobs`, `GET /jobs/{id}`) backed by an Alembic-migrated Postgres schema. An arq worker processes queued jobs against Redis.
-
-## Repo layout
-
-```
-app/          FastAPI service
-tests/        Unit tests
-k8s/          Kubernetes manifests / Helm chart
-terraform/    AWS infrastructure as code (VPC, EKS, RDS)
-loadtest/     Locust load tests and chaos experiments
-docs/         Architecture diagram, runbooks, postmortems
-```
-
-## Running locally
+Requires Docker.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-
-uvicorn app.main:app --reload
+git clone https://github.com/jessechumo/pulse-platform.git
+cd pulse-platform
+docker compose up -d --build
+docker compose exec app alembic upgrade head
 ```
 
 ```bash
 curl localhost:8000/health
 curl localhost:8000/ready
-curl localhost:8000/metrics
+curl -X POST localhost:8000/jobs -H "Content-Type: application/json" -d '{}'
 ```
 
-```bash
-pytest -m "not integration"   # fast, no external services
-pytest                         # full suite, needs postgres/redis up
-```
+Stop everything with `docker compose down`.
+
+### Run the app without Docker
+
+Postgres and Redis still run in containers; the app runs on the host for fast iteration.
 
 ```bash
-docker build -t pulse-platform .
-docker run -p 8000:8000 pulse-platform
-```
-
-## Running with Docker Compose
-
-```bash
-docker compose up --build
-```
-
-To run the app on the host against the containers' Postgres/Redis:
-
-```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
 docker compose up -d postgres redis
 cp .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-## Database migrations
-
-Schema changes go through Alembic, not `create_all()`. With Postgres up:
+### Tests
 
 ```bash
-alembic upgrade head
+pytest -m "not integration"   # no external services needed
+pytest                        # full suite, needs postgres and redis running
 ```
 
-New migration after changing a model:
+## What this project demonstrates
 
-```bash
-alembic revision --autogenerate -m "describe the change"
-```
+- FastAPI service with liveness and readiness probes, structured JSON logging, and Prometheus metrics
+- Postgres schema managed with Alembic migrations, Redis backed background jobs via arq
+- Kubernetes manifests, both raw and packaged as a Helm chart: Deployments, HPA, Ingress, ConfigMaps, Secrets
+- Prometheus and Grafana via kube-prometheus-stack, a custom dashboard, and two SLO backed alerts
+- GitHub Actions CI: lint, test against real Postgres and Redis, Docker build, Trivy image scan
+- Terraform for an equivalent AWS environment: VPC, EKS, RDS
+- Load testing with Locust and chaos experiments for pod and database failures
 
-## Running on Kubernetes (kind)
+## Kubernetes
+
+Local cluster with kind:
 
 ```bash
 kind create cluster --config k8s/kind/kind-config.yaml
-
-# ingress-nginx, kind's own install variant -- check for a newer release tag
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.3/deploy/static/provider/kind/deploy.yaml
-kubectl wait --namespace ingress-nginx --for=condition=ready pod \
-  --selector=app.kubernetes.io/component=controller --timeout=120s
+kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
 
 docker build -t pulse-platform:dev .
 kind load docker-image pulse-platform:dev --name pulse-platform
 kubectl apply -f k8s/
-
-# Schema has to exist before /jobs will work -- nothing above runs
-# migrations automatically. Re-run after any later schema change too:
-# kubectl delete job pulse-migrate -n pulse --ignore-not-found first.
 kubectl apply -f k8s/jobs/migrate-job.yaml
 kubectl wait --for=condition=complete job/pulse-migrate -n pulse --timeout=60s
 
 curl localhost/health
 ```
 
-The HPAs need `metrics-server`, which kind doesn't ship by default. Its kubelet certs also aren't signed in a way metrics-server trusts out of the box, so it needs `--kubelet-insecure-tls` -- fine on a local kind cluster, not something to carry into a real one:
+kind does not ship `metrics-server`, so the HPAs will not report CPU usage until it is installed separately.
 
-```bash
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-kubectl patch deployment metrics-server -n kube-system --type='json' \
-  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
-kubectl get hpa -n pulse
-```
-
-## Running with Helm
-
-Same manifests, packaged as a chart (`k8s/helm/pulse-platform`), parameterized via `values.yaml` instead of hardcoded image tags, replica bounds, and credentials. Needs the same cluster prep above (kind cluster, ingress-nginx, metrics-server). Migrations run automatically here -- the chart includes a `pre-install,pre-upgrade` hook Job that runs `alembic upgrade head` before the app rolls out, unlike the raw-manifest path above where it's a manual step:
+Or with Helm, which runs migrations automatically as a pre-install and pre-upgrade hook:
 
 ```bash
 helm install pulse k8s/helm/pulse-platform --namespace pulse --create-namespace
 ```
 
-Override anything in `values.yaml` with `--set` or `-f`, e.g. a different image tag:
-
-```bash
-helm upgrade pulse k8s/helm/pulse-platform --namespace pulse --set image.tag=v1.2.3
-```
-
-## CI
-
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push and PR: `ruff check` in its own job, the full `pytest` suite (including the integration tests, against real Postgres/Redis service containers) in another, then builds the Docker image and scans it with Trivy once both pass.
-
-## Observability
+### Observability
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm install observability prometheus-community/kube-prometheus-stack \
   --namespace observability --create-namespace \
   -f k8s/observability/kube-prometheus-stack-values.yaml
-```
-
-Then wire the app up to it. `k8s/observability/*.yaml` is deliberately separate from `kubectl apply -f k8s/` -- the ServiceMonitor and PrometheusRule need their CRDs from kube-prometheus-stack, so they have to come after, not in the same sweep:
-
-```bash
 kubectl apply -f k8s/observability/
 ```
 
-If you're using the Helm chart instead, its ServiceMonitor and PrometheusRule templates only render when the cluster actually has the matching CRD, so install order doesn't matter there -- `helm upgrade` after installing kube-prometheus-stack is enough to pick them up.
+Two SLOs are enforced as Prometheus alerts: 99.5% availability and p95 latency under 300ms.
 
-### SLOs
-
-- **Availability**: 99.5% of requests succeed (non-5xx), measured as a rolling 5m error ratio.
-- **Latency**: p95 request duration under 300ms, measured as a rolling 5m histogram quantile.
-
-Both are enforced as Prometheus alerts (`k8s/observability/app-prometheusrule.yaml`): `PulseAppHighErrorRate` and `PulseAppHighLatency`, each firing after 5 minutes sustained over threshold.
-
-## Load testing
+### Load testing and chaos
 
 ```bash
 pip install locust
 locust -f loadtest/locustfile.py --host http://localhost:8000
+
+loadtest/chaos/kill-app-pod.sh
+loadtest/chaos/kill-postgres.sh
 ```
 
-Open `http://localhost:8089` to drive load and watch the Grafana dashboard / HPA respond. Against the Helm-deployed app through Ingress, use `--host http://localhost` instead.
+## Terraform
 
-## Chaos experiments
-
-```bash
-loadtest/chaos/kill-app-pod.sh      # kill a random pulse-app pod
-loadtest/chaos/kill-postgres.sh     # kill the postgres pod
-```
-
-Each script states its hypothesis and what to watch in a comment at the top. Run them while `loadtest/locustfile.py` is generating traffic to see the effect on real requests, not just on an idle cluster.
-
-## Terraform (AWS)
-
-Provisions an equivalent of the kind setup on real AWS: VPC, EKS, RDS. Meant to be applied once for evidence it works, then destroyed -- see [`docs/runbooks/terraform-apply-destroy.md`](docs/runbooks/terraform-apply-destroy.md) for the full walkthrough, cost ballpark, and what to verify before tearing it down.
+Provisions an equivalent environment on AWS: VPC, EKS, RDS. Meant to be applied once for evidence it works, then destroyed. See [docs/runbooks/terraform-apply-destroy.md](docs/runbooks/terraform-apply-destroy.md) for cost estimates and the full walkthrough.
 
 ```bash
 cd terraform
@@ -204,32 +115,26 @@ terraform init
 terraform plan
 ```
 
-## Runbooks
+## Repo layout
 
-- [`docs/runbooks/on-call.md`](docs/runbooks/on-call.md) -- what to check when an alert fires, `/ready` starts failing, or a deploy needs rolling back.
-- [`docs/runbooks/terraform-apply-destroy.md`](docs/runbooks/terraform-apply-destroy.md) -- applying and tearing down the AWS infrastructure.
+```
+app/          FastAPI service
+tests/        Unit and integration tests
+k8s/          Kubernetes manifests and Helm chart
+terraform/    AWS infrastructure as code
+loadtest/     Locust load tests and chaos experiments
+docs/         Architecture diagram and runbooks
+```
 
-## Design notes
+Runbooks live in [docs/runbooks](docs/runbooks): on-call response and Terraform apply and destroy.
 
-- `/health` and `/ready` are separate: liveness vs. readiness, so Kubernetes can pull a pod out of rotation without restarting it.
-- JSON logs to stdout only; log collection is the platform's job, not the app's.
-- Prometheus metrics are keyed by route template, not raw path, to bound label cardinality.
-- Config is typed via `pydantic-settings`, `PULSE_`-prefixed env vars.
-- Schema changes are Alembic migrations, not `create_all()`.
-- API and worker share only a queue contract (a job id, a function name), not code -- they're separate processes, deployed and scaled independently.
-- `k8s/app-secret.yaml` is plaintext dev credentials checked into git, fine for a local kind cluster. Production would pull from a secret store (Sealed Secrets, External Secrets Operator, cloud KMS), not a committed Secret manifest.
-- Postgres and Redis run as raw StatefulSets -- Postgres gets a PVC, Redis doesn't, so a pod restart drops any in-flight queued jobs. That's deliberate: it's exactly the failure the chaos-testing milestone will exercise.
-- The ingress-nginx install is pinned to a release tag, not `main` -- a third-party manifest that can change underneath you shouldn't be applied from a moving branch.
-- `pulse-app` and `pulse-worker` have no `replicas` field -- once an HPA targets a Deployment, a hardcoded replica count in the Deployment just fights it on every apply.
-- The Helm chart doesn't manage the Namespace -- it's created separately with `--create-namespace`, so deleting the release can't take the namespace (and anything else in it) down with it.
-- CI runs lint and test as separate jobs -- a lint failure doesn't wait on Postgres/Redis service containers to spin up, and they fail independently in the GitHub UI instead of as one undifferentiated red X.
-- `trivy-action` is pinned by commit SHA, not a version tag -- it's third-party, and a tag can be moved to point at different code later. First-party actions (`actions/checkout`, `actions/setup-python`) stay tag-pinned; that distinction is deliberate, not an oversight.
-- Trivy's `ignore-unfixed: true` means CI fails only on vulnerabilities that actually have a fix available -- failing a build over something nobody can patch yet is just noise.
-- `serviceMonitorSelectorNilUsesHelmValues: false` (and the PodMonitor/Rule equivalents) is load-bearing: without it, Prometheus only scrapes ServiceMonitors created by its own Helm release, and the app's own ServiceMonitor would silently never get scraped.
-- The Grafana dashboard JSON is loaded into the Helm chart via `.Files.Get`, not inlined into the template -- the dashboard's own legend formatting uses `{{ }}`, which would otherwise be parsed as Helm templating instead of passed through as text.
-- The chart's ServiceMonitor and PrometheusRule templates are both guarded by `.Capabilities.APIVersions.Has` -- they only render if their CRD actually exists in the target cluster, so `helm install` doesn't fail on a cluster without kube-prometheus-stack.
-- The error-rate alert divides rate() by rate() with no traffic guard. On zero requests that's 0/0 -> NaN, which Prometheus drops from the result set rather than evaluating `NaN > 0.005` as true -- an idle service doesn't trip the alert, no special-casing needed.
-- Redis being unreachable at startup doesn't crash the app -- `/jobs` degrades to a clean 503 and `/health`/`/ready` keep responding. The app previously crash-looped on this (the arq pool's connection check at startup propagated and killed the whole process), which defeated the entire point of having a readiness probe.
-- `jobs.payload`/`jobs.result` are `jsonb`, not `json` -- Postgres's plain `json` type has no equality operator, so you can't even query for a row by its exact JSON content. Added as migration `0002` rather than editing `0001` in place, since a migration that may already be applied elsewhere should never be rewritten.
-- The Docker image includes `alembic.ini` and `alembic/` -- without them, nothing built from this image can run migrations, which matters once a migration runs as a Kubernetes Job using this same image instead of a developer's host Python.
-- Neither `kubectl apply -f k8s/` nor the raw manifests run migrations automatically -- `k8s/jobs/migrate-job.yaml` is a deliberate separate step (a completed Job's spec is immutable, so it can't just live in the main sweep without breaking on the second apply). The Helm chart automates this instead via a `pre-install,pre-upgrade` hook Job with a delete policy that clears the previous run first.
+## Notable decisions
+
+- `/health` and `/ready` are separate. Liveness says the process is alive; readiness says it can serve traffic, which is what lets Kubernetes pull a pod out of rotation without restarting it.
+- Redis being unreachable at startup no longer crashes the app. It used to: the job queue's connection check at boot propagated and killed the process, defeating the entire point of having a readiness probe.
+- `pulse-app` and `pulse-worker` have no `replicas` field. Once an HPA targets a Deployment, a hardcoded replica count just fights it on every apply.
+- `jobs.payload` and `jobs.result` are `jsonb`, not `json`. Postgres's plain `json` type has no equality operator, so you cannot even query a row by its exact content.
+- Third party GitHub Actions are pinned by commit SHA, not a version tag, since a tag can be repointed at different code later. First party actions stay tag pinned.
+- Prometheus only scrapes ServiceMonitors created by its own Helm release unless `serviceMonitorSelectorNilUsesHelmValues` is set to false. Easy to miss, and this app's metrics would otherwise silently never get scraped.
+- Nothing runs database migrations automatically. A completed Kubernetes Job cannot be reapplied, so the raw manifest path uses a manual step while the Helm chart runs migrations as a hook instead.
+- Prometheus metrics are keyed by route template, not raw request path, to keep label cardinality bounded.
