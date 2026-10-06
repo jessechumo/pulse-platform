@@ -12,28 +12,30 @@
     "edgeLabelBackground": "#FFFFFF"
   }
 }}%%
-flowchart TB
+flowchart LR
     client(["Client"])
-    ingress["Ingress<br/>nginx"]
 
     subgraph cluster["Kubernetes cluster"]
-        subgraph app_layer["Application"]
-            direction LR
-            app["pulse-app<br/>Deployment"]
-            worker["pulse-worker<br/>Deployment"]
-        end
+        direction LR
+        ingress@{ icon: "logos:nginx", form: "square", label: "Ingress", pos: "b" }
 
-        subgraph data_layer["Data"]
-            direction LR
-            pg[("Postgres")]
-            redis[("Redis")]
+        subgraph app_layer["Application"]
+            direction TB
+            app@{ icon: "logos:fastapi-icon", form: "square", label: "pulse-app", pos: "b" }
+            worker@{ icon: "logos:python", form: "square", label: "pulse-worker", pos: "b" }
         end
 
         subgraph obs["Observability"]
-            direction LR
-            prom["Prometheus"]
-            grafana["Grafana"]
+            direction TB
+            prom@{ icon: "logos:prometheus", form: "square", label: "Prometheus", pos: "b" }
+            grafana@{ icon: "logos:grafana", form: "square", label: "Grafana", pos: "b" }
             alertmgr["Alertmanager"]
+        end
+
+        subgraph data_layer["Data"]
+            direction TB
+            pg@{ icon: "logos:postgresql", form: "square", label: "Postgres", pos: "b" }
+            redis@{ icon: "logos:redis", form: "square", label: "Redis", pos: "b" }
         end
     end
 
@@ -42,7 +44,7 @@ flowchart TB
     app -->|enqueue| redis
     redis -->|consume| worker
     worker -->|write| pg
-    app -.->|scrape| prom
+    app -->|scrape| prom
     prom --> grafana
     prom -->|alert| alertmgr
 
