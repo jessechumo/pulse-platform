@@ -1,0 +1,49 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Helvetica, Arial, sans-serif",
+    "fontSize": "16px",
+    "primaryColor": "#EEF2FA",
+    "primaryBorderColor": "#3B5A85",
+    "primaryTextColor": "#1F2937",
+    "lineColor": "#64748B",
+    "clusterBkg": "#FAFBFC",
+    "clusterBorder": "#D0D7E2",
+    "edgeLabelBackground": "#FFFFFF"
+  }
+}}%%
+flowchart TB
+    client(["Client"])
+    ingress["Ingress<br/>nginx"]
+
+    subgraph cluster["Kubernetes cluster"]
+        subgraph app_layer["Application"]
+            direction LR
+            app["pulse-app<br/>Deployment"]
+            worker["pulse-worker<br/>Deployment"]
+        end
+
+        subgraph data_layer["Data"]
+            direction LR
+            pg[("Postgres")]
+            redis[("Redis")]
+        end
+
+        subgraph obs["Observability"]
+            direction LR
+            prom["Prometheus"]
+            grafana["Grafana"]
+            alertmgr["Alertmanager"]
+        end
+    end
+
+    client --> ingress --> app
+    app -->|read / write| pg
+    app -->|enqueue| redis
+    redis -->|consume| worker
+    worker -->|write| pg
+    app -.->|scrape| prom
+    prom --> grafana
+    prom -->|alert| alertmgr
+
+    style client fill:#1F2937,stroke:#1F2937,color:#FFFFFF
